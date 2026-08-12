@@ -1,4 +1,6 @@
 name: Build binaries
+permissions:
+  contents: write
 on:
   release:
     types: [published]
@@ -36,6 +38,13 @@ jobs:
             --add-binary "vendor/ffmpeg:." \
             --add-binary "vendor/deno:." \
             --hidden-import yt_dlp main.py
+        shell: bash
+      - name: List build outputs
+        run: |
+          echo "Contents of vendor:"
+          ls -la vendor || true
+          echo "Contents of dist:"
+          ls -la dist || true
         shell: bash
       - name: Upload to release (if release event)
         if: ${{ github.event_name == 'release' }}
@@ -82,11 +91,14 @@ jobs:
         shell: pwsh
         run: |
           .\.venv\Scripts\Activate.ps1
-          pyinstaller --noconfirm --clean --onefile --name yt-downloader \
-            --add-data "services;services" \
-            --add-binary "vendor\\ffmpeg.exe;." \
-            --add-binary "vendor\\deno.exe;." \
-            --hidden-import yt_dlp main.py
+          pyinstaller --noconfirm --clean --onefile --name yt-downloader --add-data "services;services" --add-binary "vendor\\ffmpeg.exe;." --add-binary "vendor\\deno.exe;." --hidden-import yt_dlp main.py
+      - name: List build outputs
+        shell: pwsh
+        run: |
+          Write-Host "Contents of vendor:"
+          Get-ChildItem vendor -Force -ErrorAction SilentlyContinue
+          Write-Host "Contents of dist:"
+          Get-ChildItem dist -Force -ErrorAction SilentlyContinue
       - name: Upload to release (if release event)
         if: ${{ github.event_name == 'release' }}
         uses: actions/upload-release-asset@v1
