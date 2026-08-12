@@ -1,7 +1,12 @@
 import os
 import shutil
 import subprocess
+import yt_dlp
+from typing import Any
 from PySide6.QtCore import QObject, Signal, Slot
+
+class _StopRequested(Exception):
+  pass
 
 class DownloadWorker(QObject):
   started = Signal()
@@ -20,32 +25,13 @@ class DownloadWorker(QObject):
       self.error.emit("URL vacía")
       return
     outtmpl = os.path.join(outdir, "%(title)s.%(ext)s")
+    # Usar la API Python de yt_dlp para evitar depender del binario
+    if yt_dlp is None:
+      self.error.emit("paquete yt_dlp no instalado. Instale 'yt-dlp' vía pip.")
+      return
 
-    # Construir lista de tareas (comandos) a ejecutar en secuencia según formatos seleccionados
-    tasks: list[list[str]] = []
-
-    if "mp4" in formats and "mp3" in formats:
-      # Queremos evitar re-descargar: descargamos/recodificamos a MP4 y luego extraemos MP3 con ffmpeg.
-      # Primero obtenemos el nombre de archivo esperado para construir rutas.
-      try:
-        get_name_proc = subprocess.run(["yt-dlp", "--get-filename", "-o", outtmpl, url], capture_output=True, text=True, check=True)
-        expected_path = get_name_proc.stdout.strip()
-      except Exception:
-        expected_path = None
-
-      cmd_mp4 = ["yt-dlp", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "--recode-video", "mp4", "-o", outtmpl, url]
-      tasks = [cmd_mp4]
-    elif "mp4" in formats:
-      cmd_mp4 = ["yt-dlp", "-f", "bestvideo+bestaudio/best", "--merge-output-format", "mp4", "--recode-video", "mp4", "-o", outtmpl, url]
-      tasks = [cmd_mp4]
-    elif "mp3" in formats:
-      cmd_mp3 = ["yt-dlp", "-x", "--audio-format", "mp3", "-o", outtmpl, url]
-      tasks = [cmd_mp3]
-    else:
-      tasks = [["yt-dlp", "-f", "bestaudio/best", "-o", outtmpl, url]]
-
-    # Si alguna tarea requiere ffmpeg (recode o extract), verificar disponibilidad
-    needs_ffmpeg = any(('--recode-video' in cmd) or ('-x' in cmd) for cmd in tasks)
+    # comprobar ffmpeg si la operación lo requiere
+    needs_ffmpeg = ("mp4" in formats and "mp3" in formats) or ("mp3" in formats)
     if needs_ffmpeg and not shutil.which("ffmpeg"):
       self.error.emit("ffmpeg no encontrado. Instale ffmpeg para recodificar/extraer audio.")
       return
@@ -54,42 +40,67 @@ class DownloadWorker(QObject):
     try:
       self._stopped = False
       last_ret = 0
-      for cmd in tasks:
-        self._process = subprocess.Popen(
-          cmd,
-          stdout=subprocess.PIPE,
-          stderr=subprocess.STDOUT,
-          text=True,
-          bufsize=1,
-        )
 
-        assert self._process.stdout is not None
-        for line in self._process.stdout:
-          self.output.emit(line.rstrip())
-          if self._stopped:
-            try:
-              self._process.terminate()
-            except Exception:
-              pass
-            break
+      # Preparar un YDL temporal para obtener metadata y nombre esperado
+      try:
+        with yt_dlp.YoutubeDL({"outtmpl": outtmpl, "noplaylist": True}) as probe_ydl:
+          info = probe_ydl.extract_info(url, download=False)
+          expected_path = probe_ydl.prepare_filename(info)
+      except Exception:
+        info = None
+        expected_path = None
 
-        last_ret = self._process.wait()
-        self._process = None
-        if last_ret != 0:
-          # Stop executing further tasks on error
-          break
+      # Hook de progreso para emitir salida y permitir parada
+      def progress_hook(d):
+        status = d.get("status")
+        if status == "downloading":
+          downloaded = d.get("downloaded_bytes") or 0
+          total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+          if total:
+            pct = downloaded * 100 / total
+            self.output.emit(f"descargando: {pct:.1f}%")
+          else:
+            self.output.emit(f"descargando: {d.get('eta', '')} ETA")
+        elif status == "finished":
+          self.output.emit("descarga completada, procesando...")
+        if self._stopped:
+          raise _StopRequested()
 
-      # Si se solicitó MP3 además de MP4 y la descarga/recodificación a MP4 fue exitosa,
-      # extraemos audio con ffmpeg desde el archivo resultante.
+      # Construir opciones según formato solicitado
+      ydl_opts: Any = {"outtmpl": outtmpl, "noplaylist": True, "progress_hooks": [progress_hook], "quiet": True}
+
+      if "mp4" in formats:
+        ydl_opts.update({"format": "bestvideo+bestaudio/best", "merge_output_format": "mp4"})
+      elif "mp3" in formats and len(formats) == 1:
+        # Extraer audio directamente con postprocessor (requiere ffmpeg)
+        ydl_opts.update({
+          "format": "bestaudio/best",
+          "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "2",
+          }],
+        })
+
+      # Ejecutar la descarga con yt_dlp API
+      try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+          ydl.download([url])
+      except _StopRequested:
+        last_ret = 1
+        self.output.emit("Descarga cancelada por el usuario.")
+      except Exception as e:
+        last_ret = 1
+        self.error.emit(f"yt_dlp error: {e}")
+
+      # Si se pidió MP4 y MP3, y la descarga a MP4 fue exitosa, extraer MP3 con ffmpeg
       if last_ret == 0 and "mp4" in formats and "mp3" in formats:
-        # Si tuvimos el nombre esperado, construir rutas; si no, buscar archivo .mp4 más reciente en outdir
         mp4_path = None
         if expected_path:
           base = os.path.splitext(expected_path)[0]
           mp4_path = f"{base}.mp4"
 
         if not mp4_path or not os.path.exists(mp4_path):
-          # intentar encontrar el archivo mp4 más reciente en outdir
           candidates = [os.path.join(outdir, f) for f in os.listdir(outdir) if f.lower().endswith(".mp4")]
           if candidates:
             mp4_path = max(candidates, key=os.path.getmtime)
@@ -110,18 +121,18 @@ class DownloadWorker(QObject):
             self.error.emit(f"ffmpeg failed: {e}")
             last_ret = 1
         else:
-          # No se encontró el archivo mp4 resultante
           self.output.emit("No se pudo localizar el archivo MP4 resultante para extraer MP3.")
 
       self.finished.emit(last_ret)
-    except FileNotFoundError:
-      self.error.emit("yt-dlp no encontrado. Instale yt-dlp en el PATH.")
+    except _StopRequested:
+      self.finished.emit(1)
     except Exception as e:
       self.error.emit(str(e))
 
   @Slot()
   def stop(self) -> None:
     self._stopped = True
+    # Si hay un proceso ffmpeg activo, terminarlo
     if self._process:
       try:
         self._process.terminate()

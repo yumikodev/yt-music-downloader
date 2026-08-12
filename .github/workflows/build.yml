@@ -33,7 +33,7 @@ jobs:
       - name: Build with PyInstaller
         run: |
           source .venv/bin/activate
-          pyinstaller --noconfirm --clean --onefile --name yt-downloader \
+          pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader \
             --add-data "services:services" \
             --add-binary "vendor/ffmpeg:." \
             --add-binary "vendor/deno:." \
@@ -88,7 +88,7 @@ jobs:
         shell: pwsh
         run: |
           .\.venv\Scripts\Activate.ps1
-          pyinstaller --noconfirm --clean --onefile --name yt-downloader `
+          pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader `
             --add-data 'services;services' `
             --add-binary 'vendor\ffmpeg.exe;.' `
             --add-binary 'vendor\deno.exe;.' `
