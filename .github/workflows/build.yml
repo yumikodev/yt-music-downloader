@@ -48,12 +48,9 @@ jobs:
         shell: bash
       - name: Upload to release (if release event)
         if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
+        uses: actions/gh-release@v1
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: dist/yt-downloader
-          asset_name: yt-downloader-linux
-          asset_content_type: application/octet-stream
+          files: dist/yt-downloader
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload artifact (manual / workflow_dispatch)
@@ -91,7 +88,11 @@ jobs:
         shell: pwsh
         run: |
           .\.venv\Scripts\Activate.ps1
-          pyinstaller --noconfirm --clean --onefile --name yt-downloader --add-data "services;services" --add-binary "vendor\\ffmpeg.exe;." --add-binary "vendor\\deno.exe;." --hidden-import yt_dlp main.py
+          pyinstaller --noconfirm --clean --onefile --name yt-downloader `
+            --add-data 'services;services' `
+            --add-binary 'vendor\ffmpeg.exe;.' `
+            --add-binary 'vendor\deno.exe;.' `
+            --hidden-import yt_dlp main.py
       - name: List build outputs
         shell: pwsh
         run: |
@@ -101,12 +102,9 @@ jobs:
           Get-ChildItem dist -Force -ErrorAction SilentlyContinue
       - name: Upload to release (if release event)
         if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
+        uses: actions/gh-release@v1
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: dist/yt-downloader.exe
-          asset_name: yt-downloader-windows.exe
-          asset_content_type: application/octet-stream
+          files: dist/yt-downloader.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload artifact (manual / workflow_dispatch)
