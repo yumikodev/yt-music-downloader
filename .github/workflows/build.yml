@@ -1,0 +1,105 @@
+name: Build binaries
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.14'
+      - name: Create venv and install deps
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -U pip
+          pip install -r requirements.txt pyinstaller
+        shell: bash
+      - name: Install ffmpeg and download deno (Linux)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg zip unzip
+          mkdir -p vendor
+          cp "$(which ffmpeg)" vendor/ffmpeg
+          curl -fsSL https://deno.land/install.sh | sh -s
+          cp ~/.deno/bin/deno vendor/deno
+          chmod +x vendor/deno vendor/ffmpeg
+        shell: bash
+      - name: Build with PyInstaller
+        run: |
+          source .venv/bin/activate
+          pyinstaller --noconfirm --clean --onefile --name yt-downloader \
+            --add-data "services:services" \
+            --add-binary "vendor/ffmpeg:." \
+            --add-binary "vendor/deno:." \
+            --hidden-import yt_dlp main.py
+        shell: bash
+      - name: Upload to release (if release event)
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/yt-downloader
+          asset_name: yt-downloader-linux
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifact (manual / workflow_dispatch)
+        if: ${{ github.event_name != 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: yt-downloader-linux
+          path: dist/yt-downloader
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.14'
+      - name: Create venv and install deps
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          python -m pip install -U pip
+          pip install -r requirements.txt pyinstaller
+      - name: Install ffmpeg and deno (Windows)
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y
+          choco install deno -y
+          New-Item -ItemType Directory -Force -Path vendor | Out-Null
+          $ff = (Get-Command ffmpeg).Source
+          Copy-Item $ff -Destination vendor/ffmpeg.exe -Force
+          $dn = (Get-Command deno).Source
+          Copy-Item $dn -Destination vendor/deno.exe -Force
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\Activate.ps1
+          pyinstaller --noconfirm --clean --onefile --name yt-downloader \
+            --add-data "services;services" \
+            --add-binary "vendor\\ffmpeg.exe;." \
+            --add-binary "vendor\\deno.exe;." \
+            --hidden-import yt_dlp main.py
+      - name: Upload to release (if release event)
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/yt-downloader.exe
+          asset_name: yt-downloader-windows.exe
+          asset_content_type: application/octet-stream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifact (manual / workflow_dispatch)
+        if: ${{ github.event_name != 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: yt-downloader-windows
+          path: dist/yt-downloader.exe
