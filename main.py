@@ -18,24 +18,47 @@ class Downloader:
     print("------------------------------")
     print("[1] Agregar una canción de YT")
     print("[2] Descargar canciones")
+    print("[3] Ver lista de canciones")
+    print("[4] Eliminar canción de la lista")
+    print("[0] Salir")
     print("------------------------------")
 
-    try:
-      option = int(input("Selecione la acción a realizar: "))
+    option = int(input("Selecione la acción a realizar: "))
 
-      match option:
-        case 1:
-          self.append_new_url()
-          self.options_handler()
-        case 2:
-          self.ytdlp_process()
-        case _:
-          print("¡Debes ingresar una opción válida!")
-          self.options_handler()
+    match option:
+      case 0:
+        return
+      case 1:
+        self.append_new_url()
+        self.options_handler()
+      case 2:
+        self.ytdlp_process()
+      case 3:
+        self.view_songs_list()
+        self.options_handler() 
+      case 4:
+        self.remove_song()
+        self.options_handler()
+      case _:
+        print("¡Debes ingresar una opción válida!")
+        self.options_handler()
 
-    except:
-      print("¡Debes ingresar un número válido!")
-      self.options_handler()
+  def view_songs_list(self) -> None:
+    if len(self.songs_list) == 0:
+      print("La lista de canciones está vacía. Nada por hacer.")
+      return
+
+    for idx, song in enumerate(self.songs_list):
+      print(f"[#{idx}] {song}")
+
+  def remove_song(self) -> None:
+    idx = int(input("Ingrese el índice de la canción en la lista: "))
+
+    if 0 <= idx < len(self.songs_list):
+      del self.songs_list[idx]
+    else:
+      print("¡El índice no existe en la lista!")
+      return self.remove_song()  
 
 
   def append_new_url(self) -> None:
