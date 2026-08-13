@@ -36,26 +36,48 @@ def _candidate_paths(base_dir: str | None, tool_name: str) -> list[str]:
     return candidates
 
 
-def _resolve_tool_path(tool_name: str) -> str | None:
-    candidates: list[str] = []
-    meipass_dir = getattr(sys, "_MEIPASS", None)
-    candidates.extend(_candidate_paths(meipass_dir, tool_name))
+def _requires_ffmpeg(formats: list[str]) -> bool:
+    return "mp4" in formats or "mp3" in formats
 
-    for candidate in candidates:
-        resolved = _normalize_candidate(candidate)
+
+def _resolve_tool_paths(ffmpeg_name: str, ffprobe_name: str) -> tuple[str | None, str | None]:
+    candidates_by_tool: dict[str, list[str]] = {
+        ffmpeg_name: [],
+        ffprobe_name: [],
+    }
+
+    for tool_name in (ffmpeg_name, ffprobe_name):
+        base_dirs: list[str | None] = [
+            getattr(sys, "_MEIPASS", None),
+            os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else None,
+            os.getcwd(),
+            os.path.join(os.getcwd(), "vendor"),
+        ]
+
+        for base_dir in base_dirs:
+            candidates_by_tool[tool_name].extend(_candidate_paths(base_dir, tool_name))
+
+        for candidate in [tool_name, f"{tool_name}.exe"]:
+            candidates_by_tool[tool_name].append(candidate)
+
+    def _pick(tool_name: str) -> str | None:
+        for candidate in candidates_by_tool[tool_name]:
+            resolved = _normalize_candidate(candidate)
+            if resolved:
+                return resolved
+
+        resolved = shutil.which(tool_name)
         if resolved:
-            return resolved
+            return os.path.abspath(resolved)
 
-    resolved = shutil.which(tool_name)
-    if resolved:
-        return os.path.abspath(resolved)
+        for candidate in [tool_name, f"{tool_name}.exe"]:
+            resolved = _normalize_candidate(candidate)
+            if resolved:
+                return resolved
 
-    for candidate in [tool_name, f"{tool_name}.exe"]:
-        resolved = _normalize_candidate(candidate)
-        if resolved:
-            return resolved
+        return None
 
-    return None
+    return _pick(ffmpeg_name), _pick(ffprobe_name)
 
 
 class _StopRequested(Exception):
@@ -154,9 +176,12 @@ class DownloadWorker(QObject):
             return
 
         outtmpl = os.path.join(outdir, "%(title)s.%(ext)s")
-        needs_ffmpeg = ("mp4" in formats and "mp3" in formats) or ("mp3" in formats)
-        ffmpeg_path = _resolve_tool_path("ffmpeg") if needs_ffmpeg else None
-        ffprobe_path = _resolve_tool_path("ffprobe") if needs_ffmpeg else None
+        needs_ffmpeg = _requires_ffmpeg(formats)
+        if needs_ffmpeg:
+            ffmpeg_path, ffprobe_path = _resolve_tool_paths("ffmpeg", "ffprobe")
+        else:
+            ffmpeg_path = None
+            ffprobe_path = None
 
         if needs_ffmpeg and not ffmpeg_path:
             self.error.emit("ffmpeg no encontrado. Instale ffmpeg para recodificar/extraer audio.")
