@@ -169,6 +169,7 @@ El proyecto incluye configuración de PyInstaller para generar ejecutables.
 pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader \
   --add-data "services:services" \
   --add-binary "vendor/ffmpeg:." \
+  --add-binary "vendor/ffprobe:." \
   --add-binary "vendor/deno:." \
   --hidden-import yt_dlp main.py
 ```
@@ -179,6 +180,7 @@ pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader \
 pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader `
   --add-data 'services;services' `
   --add-binary 'vendor\ffmpeg.exe;.' `
+  --add-binary 'vendor\ffprobe.exe;.' `
   --add-binary 'vendor\deno.exe;.' `
   --hidden-import yt_dlp main.py
 ```

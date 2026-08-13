@@ -1,9 +1,38 @@
 import os
 import shutil
 import subprocess
+import sys
 import yt_dlp
 from typing import Any
 from PySide6.QtCore import QObject, Signal, Slot
+
+
+def _resolve_tool_path(tool_name: str) -> str | None:
+  candidates: list[str] = []
+
+  if getattr(sys, "_MEIPASS", None):
+    candidates.append(os.path.join(sys._MEIPASS, tool_name))
+    candidates.append(os.path.join(sys._MEIPASS, f"{tool_name}.exe"))
+
+  if getattr(sys, "frozen", False):
+    exe_dir = os.path.dirname(sys.executable)
+    candidates.append(os.path.join(exe_dir, tool_name))
+    candidates.append(os.path.join(exe_dir, f"{tool_name}.exe"))
+
+  for candidate in candidates:
+    if os.path.isfile(candidate):
+      return candidate
+
+  resolved = shutil.which(tool_name)
+  if resolved:
+    return resolved
+
+  for candidate in [tool_name, f"{tool_name}.exe"]:
+    if os.path.isfile(candidate):
+      return os.path.abspath(candidate)
+
+  return None
+
 
 class _StopRequested(Exception):
   pass
@@ -32,9 +61,20 @@ class DownloadWorker(QObject):
 
     # comprobar ffmpeg si la operación lo requiere
     needs_ffmpeg = ("mp4" in formats and "mp3" in formats) or ("mp3" in formats)
-    if needs_ffmpeg and not shutil.which("ffmpeg"):
+    ffmpeg_path = _resolve_tool_path("ffmpeg") if needs_ffmpeg else None
+    ffprobe_path = _resolve_tool_path("ffprobe") if needs_ffmpeg else None
+    if needs_ffmpeg and not ffmpeg_path:
       self.error.emit("ffmpeg no encontrado. Instale ffmpeg para recodificar/extraer audio.")
       return
+    if needs_ffmpeg and not ffprobe_path:
+      self.error.emit("ffprobe no encontrado. Instale ffmpeg para recodificar/extraer audio.")
+      return
+
+    if ffmpeg_path:
+      ffmpeg_dir = os.path.dirname(ffmpeg_path)
+      current_path = os.environ.get("PATH", "")
+      if ffmpeg_dir not in current_path.split(os.pathsep):
+        os.environ["PATH"] = f"{ffmpeg_dir}{os.pathsep}{current_path}" if current_path else ffmpeg_dir
 
     self.started.emit()
     try:
@@ -67,7 +107,16 @@ class DownloadWorker(QObject):
           raise _StopRequested()
 
       # Construir opciones según formato solicitado
-      ydl_opts: Any = {"outtmpl": outtmpl, "noplaylist": True, "progress_hooks": [progress_hook], "quiet": True}
+      ydl_opts: Any = {
+        "outtmpl": outtmpl,
+        "noplaylist": True,
+        "progress_hooks": [progress_hook],
+        "quiet": True,
+      }
+      if ffmpeg_path:
+        ydl_opts["ffmpeg_location"] = ffmpeg_path
+      if ffprobe_path:
+        ydl_opts["ffprobe_location"] = ffprobe_path
 
       if "mp4" in formats:
         ydl_opts.update({"format": "bestvideo+bestaudio/best", "merge_output_format": "mp4"})
@@ -107,7 +156,7 @@ class DownloadWorker(QObject):
 
         if mp4_path and os.path.exists(mp4_path):
           mp3_path = os.path.splitext(mp4_path)[0] + ".mp3"
-          ff_cmd = ["ffmpeg", "-y", "-i", mp4_path, "-vn", "-acodec", "libmp3lame", "-q:a", "2", mp3_path]
+          ff_cmd = [ffmpeg_path or "ffmpeg", "-y", "-i", mp4_path, "-vn", "-acodec", "libmp3lame", "-q:a", "2", mp3_path]
           try:
             ff_proc = subprocess.Popen(ff_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             assert ff_proc.stdout is not None

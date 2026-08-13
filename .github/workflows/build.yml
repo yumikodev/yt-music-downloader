@@ -26,9 +26,10 @@ jobs:
           sudo apt-get install -y ffmpeg zip unzip
           mkdir -p vendor
           cp "$(which ffmpeg)" vendor/ffmpeg
+          cp "$(which ffprobe)" vendor/ffprobe
           curl -fsSL https://deno.land/install.sh | sh -s
           cp ~/.deno/bin/deno vendor/deno
-          chmod +x vendor/deno vendor/ffmpeg
+          chmod +x vendor/deno vendor/ffmpeg vendor/ffprobe
         shell: bash
       - name: Build with PyInstaller
         run: |
@@ -36,7 +37,9 @@ jobs:
           pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader \
             --add-data "services:services" \
             --add-binary "vendor/ffmpeg:." \
+            --add-binary "vendor/ffprobe:." \
             --add-binary "vendor/deno:." \
+            --collect-all certifi \
             --hidden-import yt_dlp main.py
         shell: bash
       - name: List build outputs
@@ -81,7 +84,9 @@ jobs:
           choco install deno -y
           New-Item -ItemType Directory -Force -Path vendor | Out-Null
           $ff = (Get-Command ffmpeg).Source
+          $fp = (Get-Command ffprobe).Source
           Copy-Item $ff -Destination vendor/ffmpeg.exe -Force
+          Copy-Item $fp -Destination vendor/ffprobe.exe -Force
           $dn = (Get-Command deno).Source
           Copy-Item $dn -Destination vendor/deno.exe -Force
       - name: Build with PyInstaller
@@ -91,7 +96,9 @@ jobs:
           pyinstaller --noconfirm --clean --windowed --onefile --name yt-downloader `
             --add-data 'services;services' `
             --add-binary 'vendor\ffmpeg.exe;.' `
+            --add-binary 'vendor\ffprobe.exe;.' `
             --add-binary 'vendor\deno.exe;.' `
+            --collect-all certifi `
             --hidden-import yt_dlp main.py
       - name: List build outputs
         shell: pwsh
